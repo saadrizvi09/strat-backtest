@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Sniper Algo (High Win Rate)", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Saad Rizvi Gandphad strategy", layout="wide", page_icon="🎯")
 
 # --- CUSTOM INDICATOR: SAFE RSI (Manual Math Fix) ---
 class SafeRSI(bt.Indicator):
