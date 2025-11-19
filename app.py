@@ -129,24 +129,47 @@ st.markdown("""
 """)
 
 # Sidebar
+# --- SIDEBAR CONFIGURATION ---
 with st.sidebar:
     st.header("⚙️ Configuration")
     
     asset_class = st.radio("Asset Class", ["Crypto", "US Stocks"])
     
+    # 1. Define Lists
     if asset_class == "Crypto":
-        options = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "DOGE-USD", "ADA-USD"]
-    else:
-        options = ["NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "AMD", "QQQ", "SPY", "TQQQ"]
+        # Categorized Lists for easy selection
+        majors = ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "ADA-USD", "XRP-USD", "AVAX-USD", "LINK-USD"]
         
-    ticker = st.selectbox("Select Asset", options)
+        memes = [
+            "DOGE-USD", "SHIB-USD", "PEPE-USD", "FLOKI-USD", 
+            "BONK-USD", "WIF-USD", "DOGS-USD", "BOME-USD", "MEME-USD"
+        ]
+        
+        others = ["NEAR-USD", "DOT-USD", "MATIC-USD", "LTC-USD", "UNI-USD"]
+        
+        # Combine them + Add a "Custom" option
+        options = ["Use Custom Ticker"] + majors + memes + others
+        
+    else:
+        options = ["Use Custom Ticker", "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "AMD", "QQQ", "SPY", "TQQQ", "COIN", "MSTR"]
+        
+    # 2. Selection Widget
+    selected_option = st.selectbox("Select Asset", options, index=1) # Default to first coin
+    
+    # 3. Logic for Custom Ticker
+    if selected_option == "Use Custom Ticker":
+        ticker = st.text_input("Enter Ticker Symbol (e.g., PEPE-USD)", value="BTC-USD").upper()
+    else:
+        ticker = selected_option
+    
+    st.divider()
     
     col1, col2 = st.columns(2)
     start_date = col1.date_input("Start Date", datetime.date(2020, 1, 1))
-    end_date = col2.date_input("End Date", datetime.date(2023, 12, 31))
+    end_date = col2.date_input("End Date", datetime.date(2024, 12, 31))
     
-    st.subheader("Settings")
-    rsi_entry = st.slider("RSI Entry Threshold (Lower = Safer)", 2, 20, 10)
+    st.subheader("Strategy Settings")
+    rsi_entry = st.slider("RSI Entry (Lower = Safer)", 2, 20, 10)
     
     run_btn = st.button("🎯 Run Sniper", type="primary")
 
