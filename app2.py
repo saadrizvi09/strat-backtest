@@ -9,7 +9,6 @@ from plotly.subplots import make_subplots
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Dynamic Regime Switcher", layout="wide", page_icon="🦁")
 
-# --- CUSTOM INDICATOR: SAFE RSI ---
 class SafeRSI(bt.Indicator):
     lines = ('rsi',)
     params = (('period', 14), ('movav', bt.indicators.MovAv.SMA))
@@ -34,7 +33,7 @@ class RegimeSwitcher(bt.Strategy):
         ('safety_sma', 200),
         ('adx_period', 14),
         ('adx_threshold', 25),  # The Switch Point
-        ('stop_loss', 0.05),    # 5% Hard Stop
+        ('stop_loss', 0.05),   
         ('max_exposure', 0.98), # 98% Capital Usage
         ('trading_start_date', None),
     )
