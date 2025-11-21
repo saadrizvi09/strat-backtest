@@ -32,7 +32,7 @@ class SniperStrategy(bt.Strategy):
         ('rsi_entry', 10),        
         ('rsi_exit', 70),         
         ('stop_loss', 0.05),      
-        ('max_exposure', 0.98),
+        ('max_exposure', 0.95),
         ('cooldown_period', 5),   # 5 Day Ban after loss
         ('trading_start_date', None),
     )
