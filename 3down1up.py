@@ -30,7 +30,7 @@ class ThreeDownStrategy(bt.Strategy):
         ('rsi_period', 2),        # Used for EXIT only
         ('rsi_exit', 70),         # Profit Target
         ('stop_loss', 0.05),      # 5% Safety Net
-        ('max_exposure', 0.98),   # 98% Capital
+        ('max_exposure', 0.97),   # 98% Capital
         ('trading_start_date', None),
     )
 

@@ -7,8 +7,39 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="J/K Momentum Portfolio", layout="wide", page_icon="🚀")
-
+st.set_page_config(page_title="Saad Rizvi Gandphad strategy", layout="wide", page_icon="🚀")
+st.markdown(
+    """
+    <style>
+    .fixed-title {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        background-color: #0E1117;  /* Dark background */
+        color: white;
+        text-align: center;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        font-size: 30px;
+        font-weight: bold;
+        z-index: 999999; /* Super high to sit on top of everything */
+        border-bottom: 2px solid #ff4b4b; /* Red border to verify it's working */
+    }
+    /* Push main content down so it doesn't hide behind the title */
+    .block-container {
+        padding-top: 100px !important;
+    }
+    /* Hide the standard Streamlit top decoration bar if it gets in the way */
+    header[data-testid="stHeader"] {
+        z-index: 1;
+    }
+    </style>
+    
+    <div class="fixed-title">Saad Rizvi Gandphad Strategy</div>
+    """,
+    unsafe_allow_html=True
+)
 # --- 1. THE J/K MOMENTUM STRATEGY ---
 class JKMomentumStrategy(bt.Strategy):
     """
@@ -111,8 +142,7 @@ def get_universe_data(tickers, start, end):
 
 # --- 3. MAIN APP UI ---
 with st.sidebar:
-    st.header("🧪 J/K Strategy Lab")
-    st.markdown("Based on **Jegadeesh & Titman** Momentum.")
+    st.header("Saad Rizvi strat")
     
     # Universe Selection
     universe_type = st.radio("Select Universe", ["Crypto Majors", "Tech Stocks", "Meme Coins"])
