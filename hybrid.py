@@ -92,14 +92,12 @@ def train_svr_model(train_df):
 
 # --- Main Logic ---
 
-st.title("🧠 Hybrid HMM-SVR Strategy Backtester")
+st.title("🧠 Saad Rizvi Gand phad strategy")
 st.markdown("""
 **The Hybrid Strategy:**
 1.  **Driver:** EMA Crossover (Fast > Slow = Bullish).
 2.  **Filter (HMM):** If Regime is "High Vol/Crash", **Block Trade** (Size = 0).
 3.  **Sizing (SVR):** If Regime is Safe, adjust size based on predicted risk. 
-    * *If SVR predicts higher risk -> Reduce Position Size.*
-    * *If SVR predicts lower risk -> Increase Position Size.*
 """)
 
 # Sidebar Inputs
