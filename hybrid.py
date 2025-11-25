@@ -14,12 +14,44 @@ st.set_page_config(page_title="Hybrid HMM-SVR Strategy Backtester", layout="wide
 
 # --- Helper Functions ---
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def fetch_data(ticker, start_date, end_date):
-    df = yf.download(ticker, start=start_date, end=end_date)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    return df
+    """
+    Robust data fetching with caching, error handling, and string conversion.
+    """
+    # Clean ticker input
+    ticker = ticker.strip().upper()
+    
+    # Convert dates to strings to avoid Streamlit/yfinance type conflicts
+    if isinstance(start_date, (datetime, pd.Timestamp)):
+        start_date = start_date.strftime('%Y-%m-%d')
+    if isinstance(end_date, (datetime, pd.Timestamp)):
+        end_date = end_date.strftime('%Y-%m-%d')
+    
+    try:
+        # thread=False can sometimes help stability in cloud envs
+        df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        
+        # Immediate check for empty data
+        if df.empty:
+            return None
+
+        # Handle MultiIndex columns (yfinance structure change)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        # Remove rows that are completely empty
+        df = df.dropna(how='all')
+        
+        # Check length again after cleanup
+        if len(df) < 10:
+            return None
+            
+        return df
+        
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
 
 def calculate_metrics(df, strategy_col='Strategy_Value', benchmark_col='Buy_Hold_Value'):
     """Calculates CAG, Sharpe, Drawdown, etc."""
@@ -92,18 +124,25 @@ def train_svr_model(train_df):
 
 # --- Main Logic ---
 
-st.title("🧠 Saad Rizvi Gand phad strategy")
+st.title("🧠 Hybrid HMM-SVR Strategy Backtester")
 st.markdown("""
 **The Hybrid Strategy:**
 1.  **Driver:** EMA Crossover (Fast > Slow = Bullish).
 2.  **Filter (HMM):** If Regime is "High Vol/Crash", **Block Trade** (Size = 0).
 3.  **Sizing (SVR):** If Regime is Safe, adjust size based on predicted risk. 
+    * *If SVR predicts higher risk -> Reduce Position Size.*
+    * *If SVR predicts lower risk -> Increase Position Size.*
 """)
 
 # Sidebar Inputs
 with st.sidebar:
     st.header("Settings")
-    ticker = st.text_input("Ticker", "BTC-USD")
+    
+    # Changed from text input to dropdown for easier selection
+    ticker = st.selectbox(
+        "Ticker", 
+        ["BTC-USD", "BNB-USD", "SOL-USD"]
+    )
     
     # Modified Date Logic: User selects Trading Period
     backtest_start = st.date_input("Backtest Start Date", datetime.now() - timedelta(days=365))
@@ -124,7 +163,7 @@ if st.button("Run Hybrid Backtest"):
     df = fetch_data(ticker, train_start_date, backtest_end)
     
     if df is None or len(df) < 200:
-        st.error("Not enough data to backtest. Ensure the ticker existed 4 years prior to your start date.")
+        st.error(f"Not enough data found for {ticker}. Ensure the ticker existed 4 years prior to {backtest_start}.")
     else:
         # 1. Feature Engineering
         df['Log_Returns'] = np.log(df['Close'] / df['Close'].shift(1))
@@ -206,13 +245,21 @@ if st.button("Run Hybrid Backtest"):
                 # We shift(1) because we calculate size today for tomorrow's return
                 test_df['Final_Position'] = (test_df['Signal'] * test_df['Position_Size']).shift(1)
                 
-                # 4. Returns
-                test_df['Strategy_Returns'] = test_df['Final_Position'] * test_df['Log_Returns']
-                test_df['Buy_Hold_Returns'] = test_df['Log_Returns']
+                # 4. Returns (Using Simple Returns for accurate Equity Curve)
+                # We calculate simple % change for the portfolio value
+                test_df['Simple_Returns'] = test_df['Close'].pct_change()
                 
-                # Cumulative
-                test_df['Strategy_Value'] = (1 + test_df['Strategy_Returns']).cumprod()
-                test_df['Buy_Hold_Value'] = (1 + test_df['Buy_Hold_Returns']).cumprod()
+                # Strategy Returns: Position * Simple Return
+                test_df['Strategy_Returns'] = test_df['Final_Position'] * test_df['Simple_Returns']
+                
+                # Buy & Hold Returns: Just Simple Return
+                test_df['Buy_Hold_Returns'] = test_df['Simple_Returns']
+                
+                # Cumulative Equity Curve (Accurate Money Growth)
+                # We fill NaN with 0 for the first day to avoid breaking the cumprod
+                test_df['Strategy_Value'] = (1 + test_df['Strategy_Returns'].fillna(0)).cumprod()
+                test_df['Buy_Hold_Value'] = (1 + test_df['Buy_Hold_Returns'].fillna(0)).cumprod()
+                
                 test_df.dropna(inplace=True)
                 
                 # --- RESULTS ---
