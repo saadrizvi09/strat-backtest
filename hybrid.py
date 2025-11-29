@@ -19,31 +19,24 @@ def fetch_data(ticker, start_date, end_date):
     """
     Robust data fetching with caching, error handling, and string conversion.
     """
-    # Clean ticker input
     ticker = ticker.strip().upper()
     
-    # Convert dates to strings to avoid Streamlit/yfinance type conflicts
     if isinstance(start_date, (datetime, pd.Timestamp)):
         start_date = start_date.strftime('%Y-%m-%d')
     if isinstance(end_date, (datetime, pd.Timestamp)):
         end_date = end_date.strftime('%Y-%m-%d')
     
     try:
-        # thread=False can sometimes help stability in cloud envs
         df = yf.download(ticker, start=start_date, end=end_date, progress=False)
         
-        # Immediate check for empty data
         if df.empty:
             return None
 
-        # Handle MultiIndex columns (yfinance structure change)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        # Remove rows that are completely empty
         df = df.dropna(how='all')
         
-        # Check length again after cleanup
         if len(df) < 10:
             return None
             
@@ -58,18 +51,14 @@ def calculate_metrics(df, strategy_col='Strategy_Value', benchmark_col='Buy_Hold
     stats = {}
     
     for col, name in [(strategy_col, 'Hybrid Strategy'), (benchmark_col, 'Buy & Hold')]:
-        # Returns
         initial = df[col].iloc[0]
         final = df[col].iloc[-1]
         total_return = (final - initial) / initial
         
-        # Daily Returns
         daily_ret = df[col].pct_change().dropna()
         
-        # Sharpe (Annualized, assuming 365 trading days for crypto)
         sharpe = (daily_ret.mean() / daily_ret.std()) * np.sqrt(365) if daily_ret.std() != 0 else 0
         
-        # Max Drawdown
         rolling_max = df[col].cummax()
         drawdown = (df[col] - rolling_max) / rolling_max
         max_drawdown = drawdown.min()
@@ -84,13 +73,11 @@ def calculate_metrics(df, strategy_col='Strategy_Value', benchmark_col='Buy_Hold
 
 def train_hmm_model(train_df, n_states):
     """Trains HMM on historical data (In-Sample)."""
-    # Features: Log Returns and Volatility
     X_train = train_df[['Log_Returns', 'Volatility']].values * 100
     
     model = GaussianHMM(n_components=n_states, covariance_type="full", n_iter=100, random_state=42)
     model.fit(X_train)
     
-    # Sort states by Volatility (State 0 = Lowest Risk)
     hidden_states = model.predict(X_train)
     state_vol = []
     for i in range(n_states):
@@ -98,29 +85,86 @@ def train_hmm_model(train_df, n_states):
         state_vol.append((i, avg_vol))
     state_vol.sort(key=lambda x: x[1])
     
-    # Create mapping: {Random_ID: Sorted_ID}
     mapping = {old: new for new, (old, _) in enumerate(state_vol)}
     
     return model, mapping
 
 def train_svr_model(train_df):
     """Trains SVR to predict next day's volatility."""
-    # Features for SVR: Returns, Current Vol, Downside Vol, Regime
     feature_cols = ['Log_Returns', 'Volatility', 'Downside_Vol', 'Regime']
     target_col = 'Target_Next_Vol'
     
     X = train_df[feature_cols].values
     y = train_df[target_col].values
     
-    # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     
-    # SVR with RBF kernel
     model = SVR(kernel='rbf', C=100, gamma=0.1, epsilon=0.01)
     model.fit(X_scaled, y)
     
     return model, scaler
+
+def generate_trade_log(df):
+    """
+    Scans the backtest dataframe to identify individual trade cycles.
+    A 'Trade' is defined as a period where Position Size > 0.
+    """
+    trades = []
+    in_trade = False
+    entry_date = None
+    entry_price = 0
+    trade_returns = []
+    
+    # We iterate through the dataframe
+    for date, row in df.iterrows():
+        pos = row['Final_Position']
+        close_price = row['Close']
+        
+        # Check for Entry (Position goes from 0 to > 0)
+        if pos > 0 and not in_trade:
+            in_trade = True
+            entry_date = date
+            entry_price = close_price # Approximation for log visualization
+            trade_returns = [row['Strategy_Returns']] # Start tracking returns for this specific trade
+            
+        # Check for adjustments while in trade
+        elif pos > 0 and in_trade:
+            trade_returns.append(row['Strategy_Returns'])
+            
+        # Check for Exit (Position goes to 0 while we were in a trade)
+        elif pos == 0 and in_trade:
+            in_trade = False
+            exit_date = date
+            exit_price = close_price
+            
+            # Calculate compounded return for this specific trade period
+            # (1+r1)*(1+r2)... - 1
+            cum_trade_ret = np.prod([1 + r for r in trade_returns]) - 1
+            
+            trades.append({
+                'Entry Date': entry_date,
+                'Exit Date': exit_date,
+                'Entry Price (Approx)': entry_price,
+                'Exit Price': exit_price,
+                'Duration (Days)': len(trade_returns),
+                'Trade PnL': cum_trade_ret
+            })
+            trade_returns = []
+
+    # Handle case where trade is still open at end of data
+    if in_trade:
+        cum_trade_ret = np.prod([1 + r for r in trade_returns]) - 1
+        trades.append({
+            'Entry Date': entry_date,
+            'Exit Date': df.index[-1],
+            'Entry Price (Approx)': entry_price,
+            'Exit Price': df.iloc[-1]['Close'],
+            'Duration (Days)': len(trade_returns),
+            'Trade PnL': cum_trade_ret
+        })
+
+    return pd.DataFrame(trades)
 
 # --- Main Logic ---
 
@@ -138,28 +182,39 @@ st.markdown("""
 with st.sidebar:
     st.header("Settings")
     
-    # Changed from text input to dropdown for easier selection
+    # Added key='ticker_select'
     ticker = st.selectbox(
         "Ticker", 
-        ["BTC-USD", "BNB-USD", "SOL-USD"]
+        ["BTC-USD", "BNB-USD", "SOL-USD"],
+        key="ticker_select" 
     )
     
-    # Modified Date Logic: User selects Trading Period
-    backtest_start = st.date_input("Backtest Start Date", datetime.now() - timedelta(days=365))
-    backtest_end = st.date_input("Backtest End Date", datetime.now())
+    # Added key='start_date'
+    backtest_start = st.date_input(
+        "Backtest Start Date", 
+        datetime.now() - timedelta(days=1425),
+        key="start_date"
+    )
+
+    # Added key='end_date'
+    backtest_end = st.date_input(
+        "Backtest End Date", 
+        datetime.now(),
+        key="end_date"
+    )
     
     st.caption("Note: Models will automatically train on the **4 years** of data prior to your selected Start Date.")
     
     st.divider()
-    short_window = st.number_input("Fast EMA", 12)
-    long_window = st.number_input("Slow EMA", 26)
-    n_states = st.slider("HMM States", 2, 4, 3)
+    
+    # Added keys for these as well just to be safe
+    short_window = st.number_input("Fast EMA", 12, key="fast_ema")
+    long_window = st.number_input("Slow EMA", 26, key="slow_ema")
+    n_states = st.slider("HMM States", 2, 4, 3, key="hmm_slider")
 
 if st.button("Run Hybrid Backtest"):
-    # Calculate the Training Start Date (4 Years before Backtest Start)
     train_start_date = pd.Timestamp(backtest_start) - pd.DateOffset(years=4)
     
-    # Fetch ALL data (Training Period + Backtest Period)
     df = fetch_data(ticker, train_start_date, backtest_end)
     
     if df is None or len(df) < 200:
@@ -169,20 +224,17 @@ if st.button("Run Hybrid Backtest"):
         df['Log_Returns'] = np.log(df['Close'] / df['Close'].shift(1))
         df['Volatility'] = df['Log_Returns'].rolling(window=10).std()
         
-        # Downside Volatility (Leverage Effect Feature)
         df['Downside_Returns'] = df['Log_Returns'].apply(lambda x: x if x < 0 else 0)
         df['Downside_Vol'] = df['Downside_Returns'].rolling(window=10).std()
         
-        # Strategy Indicators
         df['EMA_Short'] = df['Close'].ewm(span=short_window, adjust=False).mean()
         df['EMA_Long'] = df['Close'].ewm(span=long_window, adjust=False).mean()
         
-        # Target for SVR (Next Day Volatility)
         df['Target_Next_Vol'] = df['Volatility'].shift(-1)
         
         df = df.dropna()
         
-        # 2. Split Data based on Dates
+        # 2. Split Data
         train_df = df[df.index < pd.Timestamp(backtest_start)].copy()
         test_df = df[df.index >= pd.Timestamp(backtest_start)].copy()
         
@@ -197,7 +249,6 @@ if st.button("Run Hybrid Backtest"):
             with st.spinner("Training HMM (Regime Detection)..."):
                 hmm_model, state_map = train_hmm_model(train_df, n_states)
                 
-                # Predict Train Regimes (Needed for SVR training input)
                 X_train_hmm = train_df[['Log_Returns', 'Volatility']].values * 100
                 train_raw_states = hmm_model.predict(X_train_hmm)
                 train_df['Regime'] = [state_map.get(s, s) for s in train_raw_states]
@@ -208,59 +259,42 @@ if st.button("Run Hybrid Backtest"):
             with st.spinner("Running Backtest Loop..."):
                 # --- OUT OF SAMPLE BACKTEST ---
                 
-                # 1. Predict Regimes for Test Data
                 X_test_hmm = test_df[['Log_Returns', 'Volatility']].values * 100
                 test_raw_states = hmm_model.predict(X_test_hmm)
                 test_df['Regime'] = [state_map.get(s, s) for s in test_raw_states]
                 
-                # 2. Predict Volatility for Test Data (Using SVR)
                 X_test_svr = test_df[['Log_Returns', 'Volatility', 'Downside_Vol', 'Regime']].values
                 X_test_svr_scaled = svr_scaler.transform(X_test_svr)
                 test_df['Predicted_Vol'] = svr_model.predict(X_test_svr_scaled)
                 
-                # 3. Calculate Strategy Logic
                 high_vol_state = n_states - 1
                 
-                # Base Signal (EMA)
                 test_df['Signal'] = np.where(test_df['EMA_Short'] > test_df['EMA_Long'], 1, 0)
                 
-                # Calculate Baseline Risk (Average Volatility seen in Training)
                 avg_train_vol = train_df['Volatility'].mean()
                 
-                # Calculate Position Size (The "Dimmer Switch")
-                # Logic: Size = Average_Vol / Predicted_Vol
-                # If Predicted > Average, Size < 1.0 (Reduce Risk)
-                # If Predicted < Average, Size > 1.0 (Increase Risk) -> Capped at 1.0 for safety
                 test_df['Risk_Ratio'] = test_df['Predicted_Vol'] / avg_train_vol
                 test_df['Position_Size'] = (1.0 / test_df['Risk_Ratio']).clip(upper=1.0, lower=0.0)
                 
-                # Override: If HMM says CRASH, Size = 0
                 test_df['Position_Size'] = np.where(
-                    test_df['Regime'] == high_vol_state, 
+                    test_df['Regime'] == high_vol_state ,
                     0.0, 
                     test_df['Position_Size']
                 )
                 
-                # Final Position: Signal * Size
-                # We shift(1) because we calculate size today for tomorrow's return
                 test_df['Final_Position'] = (test_df['Signal'] * test_df['Position_Size']).shift(1)
                 
-                # 4. Returns (Using Simple Returns for accurate Equity Curve)
-                # We calculate simple % change for the portfolio value
                 test_df['Simple_Returns'] = test_df['Close'].pct_change()
-                
-                # Strategy Returns: Position * Simple Return
                 test_df['Strategy_Returns'] = test_df['Final_Position'] * test_df['Simple_Returns']
-                
-                # Buy & Hold Returns: Just Simple Return
                 test_df['Buy_Hold_Returns'] = test_df['Simple_Returns']
                 
-                # Cumulative Equity Curve (Accurate Money Growth)
-                # We fill NaN with 0 for the first day to avoid breaking the cumprod
                 test_df['Strategy_Value'] = (1 + test_df['Strategy_Returns'].fillna(0)).cumprod()
                 test_df['Buy_Hold_Value'] = (1 + test_df['Buy_Hold_Returns'].fillna(0)).cumprod()
                 
                 test_df.dropna(inplace=True)
+                
+                # --- EXTRACT TRADES ---
+                trade_log = generate_trade_log(test_df)
                 
                 # --- RESULTS ---
                 
@@ -272,10 +306,39 @@ if st.button("Run Hybrid Backtest"):
                 col1, col2 = st.columns([2, 1])
                 
                 with col1:
-                    st.subheader("Equity Curve")
+                    st.subheader("Equity Curve & Trade Executions")
                     fig = go.Figure()
+                    
+                    # 1. Equity Curves
                     fig.add_trace(go.Scatter(x=test_df.index, y=test_df['Buy_Hold_Value'], name='Buy & Hold', line=dict(color='gray', dash='dot')))
                     fig.add_trace(go.Scatter(x=test_df.index, y=test_df['Strategy_Value'], name='Hybrid Strategy', line=dict(color='#00CC96', width=2)))
+                    
+                    # 2. Add Trade Markers
+                    # Filter Entry Points (Buy)
+                    if not trade_log.empty:
+                        # Map dates to Strategy Value for Y-axis placement
+                        buy_points = trade_log.set_index('Entry Date')
+                        buy_vals = test_df.loc[buy_points.index]['Strategy_Value']
+                        
+                        sell_points = trade_log.set_index('Exit Date')
+                        sell_vals = test_df.loc[sell_points.index]['Strategy_Value']
+
+                        fig.add_trace(go.Scatter(
+                            x=buy_points.index, 
+                            y=buy_vals,
+                            mode='markers',
+                            name='Buy Signal',
+                            marker=dict(symbol='triangle-up', size=10, color='lime')
+                        ))
+                        
+                        fig.add_trace(go.Scatter(
+                            x=sell_points.index, 
+                            y=sell_vals,
+                            mode='markers',
+                            name='Sell Signal',
+                            marker=dict(symbol='triangle-down', size=10, color='red')
+                        ))
+
                     st.plotly_chart(fig, use_container_width=True)
                     
                 with col2:
@@ -284,9 +347,24 @@ if st.button("Run Hybrid Backtest"):
                     fig_size = px.area(test_df, x=test_df.index, y='Position_Size', title="Dynamic Exposure")
                     st.plotly_chart(fig_size, use_container_width=True)
                 
+                # --- NEW: Trade Log Table ---
+                st.divider()
+                st.subheader("📝 Detailed Trade Log")
+                if not trade_log.empty:
+                    # Formatting for cleaner display
+                    display_log = trade_log.copy()
+                    display_log['Entry Date'] = display_log['Entry Date'].dt.date
+                    display_log['Exit Date'] = display_log['Exit Date'].dt.date
+                    display_log['Trade PnL'] = display_log['Trade PnL'].map('{:.2%}'.format)
+                    display_log['Entry Price (Approx)'] = display_log['Entry Price (Approx)'].map('{:.2f}'.format)
+                    display_log['Exit Price'] = display_log['Exit Price'].map('{:.2f}'.format)
+                    
+                    st.dataframe(display_log, use_container_width=True)
+                else:
+                    st.write("No trades executed in this period.")
+
                 st.subheader("SVR Prediction Accuracy (Test Set)")
                 fig_svr = go.Figure()
-                # Show a slice to avoid clutter
                 slice_df = test_df.iloc[-100:] 
                 fig_svr.add_trace(go.Scatter(x=slice_df.index, y=slice_df['Target_Next_Vol'], name='Actual Volatility'))
                 fig_svr.add_trace(go.Scatter(x=slice_df.index, y=slice_df['Predicted_Vol'], name='SVR Prediction', line=dict(dash='dot')))
