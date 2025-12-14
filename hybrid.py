@@ -7,8 +7,7 @@ from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime, timedelta
-
+from datetime import datetime, timedelta, date
 # --- Config ---
 st.set_page_config(page_title="Hybrid HMM-SVR Strategy Backtester", layout="wide")
 
@@ -192,7 +191,7 @@ with st.sidebar:
     # Added key='start_date'
     backtest_start = st.date_input(
         "Backtest Start Date", 
-        datetime.now() - timedelta(days=1425),
+        date(2022, 1, 1),
         key="start_date"
     )
 

@@ -8,3 +8,4 @@ streamlit
 scikit-learn 
 hmmlearn
 ruptures
+networkx
